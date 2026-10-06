@@ -1,0 +1,112 @@
+from pathlib import Path
+import json
+import os
+
+ENV_PATH = Path(".env")
+DEFAULT_ENV_KEYS = [
+    "BOT_NAME",
+    "BOT_VERSION",
+    "GITHUB_REPO",
+    "DISCORD_BOT_TOKEN",
+    "DISCORD_GUILD_ID",
+    "DISCORD_ADMIN_ROLE",
+    "DISCORD_ALLOWED_USER_IDS",
+    "DISCORD_WEBHOOK_URL",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "WHATSAPP_ADMIN_ID",
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+    "DASHBOARD_ADMIN_USER",
+    "DASHBOARD_ADMIN_PASS",
+    "TELEGRAM_ADMIN_ID",
+]
+
+
+def _read_env_file():
+    env = {}
+    if not ENV_PATH.exists():
+        return env
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key.strip()] = value.strip()
+    return env
+
+
+def list_env_settings():
+    env = _read_env_file()
+    settings = []
+    for key in DEFAULT_ENV_KEYS:
+        settings.append({"key": key, "value": env.get(key, "")})
+    return settings
+
+
+def update_env_key(key: str, value: str):
+    if not key:
+        return {"success": False, "error": "Key is required"}
+
+    key = key.strip()
+    env = _read_env_file()
+    env[key] = str(value)
+
+    lines = []
+    seen = set()
+    for existing in ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []:
+        if not existing.strip() or existing.strip().startswith("#"):
+            lines.append(existing)
+            continue
+        if "=" not in existing:
+            lines.append(existing)
+            continue
+        current_key = existing.split("=", 1)[0].strip()
+        if current_key == key:
+            lines.append(f"{key}={str(value)}")
+            seen.add(key)
+        else:
+            lines.append(existing)
+            seen.add(current_key)
+
+    if key not in seen:
+        lines.append(f"{key}={str(value)}")
+
+    ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"success": True, "key": key, "value": str(value)}
+
+
+def get_server_state():
+    path = Path("data/server_state.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        default = {
+            "welcome_enabled": False,
+            "moderation_enabled": False,
+            "auto_role_enabled": False,
+            "allowed_roles": [],
+            "welcome_message": "Welcome to AI-Bot Control Center!",
+            "lockdown_mode": False,
+        }
+        path.write_text(json.dumps(default, indent=2), encoding="utf-8")
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        default = {
+            "welcome_enabled": False,
+            "moderation_enabled": False,
+            "auto_role_enabled": False,
+            "allowed_roles": [],
+            "welcome_message": "Welcome to AI-Bot Control Center!",
+            "lockdown_mode": False,
+        }
+        path.write_text(json.dumps(default, indent=2), encoding="utf-8")
+        return default
+
+
+def save_server_state(state):
+    path = Path("data/server_state.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    return state

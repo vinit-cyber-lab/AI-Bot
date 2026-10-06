@@ -1,0 +1,35 @@
+from pathlib import Path
+import json
+from datetime import datetime
+
+LOG_PATH = Path("logs/admin_audit.log")
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def log_admin_action(action: str, actor: str, details: str, success: bool = True):
+    entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "action": action,
+        "actor": actor,
+        "details": details,
+        "success": success,
+    }
+    with LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return entry
+
+
+def read_admin_audit(limit: int = 50):
+    if not LOG_PATH.exists():
+        return []
+    rows = []
+    with LOG_PATH.open("r", encoding="utf-8") as handle:
+        for line in handle.readlines()[-limit:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                rows.append({"raw": line})
+    return rows

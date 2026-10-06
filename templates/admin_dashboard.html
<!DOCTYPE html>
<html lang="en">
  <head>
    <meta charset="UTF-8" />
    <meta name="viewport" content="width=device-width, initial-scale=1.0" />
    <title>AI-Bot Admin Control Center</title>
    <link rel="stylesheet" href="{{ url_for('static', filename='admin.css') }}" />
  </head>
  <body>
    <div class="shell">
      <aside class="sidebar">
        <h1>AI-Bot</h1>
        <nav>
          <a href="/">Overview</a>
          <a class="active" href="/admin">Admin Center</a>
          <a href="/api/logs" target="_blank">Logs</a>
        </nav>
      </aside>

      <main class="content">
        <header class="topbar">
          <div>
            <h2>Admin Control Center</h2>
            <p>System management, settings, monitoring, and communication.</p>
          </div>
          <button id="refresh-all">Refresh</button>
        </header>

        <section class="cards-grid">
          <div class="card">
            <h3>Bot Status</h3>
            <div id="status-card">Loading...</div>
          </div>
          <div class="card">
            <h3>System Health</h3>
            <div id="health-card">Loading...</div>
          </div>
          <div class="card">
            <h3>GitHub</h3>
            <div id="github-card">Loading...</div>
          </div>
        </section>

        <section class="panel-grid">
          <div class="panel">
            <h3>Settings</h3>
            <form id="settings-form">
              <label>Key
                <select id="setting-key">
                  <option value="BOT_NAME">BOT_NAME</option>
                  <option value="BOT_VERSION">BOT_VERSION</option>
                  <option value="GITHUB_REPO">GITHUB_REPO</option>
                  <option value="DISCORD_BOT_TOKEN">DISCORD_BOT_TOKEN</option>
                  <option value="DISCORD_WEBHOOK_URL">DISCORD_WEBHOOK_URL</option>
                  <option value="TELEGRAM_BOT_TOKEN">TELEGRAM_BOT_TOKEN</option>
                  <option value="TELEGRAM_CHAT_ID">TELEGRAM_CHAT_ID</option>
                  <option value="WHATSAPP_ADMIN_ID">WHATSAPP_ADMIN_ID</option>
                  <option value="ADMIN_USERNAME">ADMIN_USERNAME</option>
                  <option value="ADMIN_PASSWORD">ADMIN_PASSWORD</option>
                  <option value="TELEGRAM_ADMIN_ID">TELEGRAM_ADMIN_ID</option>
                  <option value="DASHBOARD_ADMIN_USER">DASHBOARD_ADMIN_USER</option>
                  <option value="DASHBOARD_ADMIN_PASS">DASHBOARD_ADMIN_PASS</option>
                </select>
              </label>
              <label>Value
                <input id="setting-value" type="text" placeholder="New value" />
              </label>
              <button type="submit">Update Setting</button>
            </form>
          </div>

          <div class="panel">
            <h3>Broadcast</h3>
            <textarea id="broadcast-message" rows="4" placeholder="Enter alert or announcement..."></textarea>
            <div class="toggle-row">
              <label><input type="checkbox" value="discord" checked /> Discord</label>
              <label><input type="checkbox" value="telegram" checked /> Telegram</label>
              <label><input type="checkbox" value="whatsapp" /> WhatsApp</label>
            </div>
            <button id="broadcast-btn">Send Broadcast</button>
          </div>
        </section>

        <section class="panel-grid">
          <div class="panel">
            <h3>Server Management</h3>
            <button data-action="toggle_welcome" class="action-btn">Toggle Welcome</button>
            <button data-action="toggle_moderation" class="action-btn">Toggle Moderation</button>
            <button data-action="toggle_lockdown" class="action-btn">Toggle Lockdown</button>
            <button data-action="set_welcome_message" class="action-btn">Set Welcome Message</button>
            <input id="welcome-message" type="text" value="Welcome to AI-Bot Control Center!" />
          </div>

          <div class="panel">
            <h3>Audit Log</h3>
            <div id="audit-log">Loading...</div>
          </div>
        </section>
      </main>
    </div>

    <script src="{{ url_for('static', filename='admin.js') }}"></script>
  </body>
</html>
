@@ -1,0 +1,28 @@
+from datetime import datetime
+
+from config import BOT_NAME
+from services.audit_logger import log_admin_action
+
+
+def add_admin_log(action: str, actor: str, message: str, success: bool = True):
+    log_admin_action(action, actor, message, success)
+    return {"success": success, "message": message}
+
+
+def build_system_status_summary(stats):
+    if not stats:
+        return {"status": "unknown", "message": "System metrics unavailable."}
+    cpu = float(stats.get("cpu_percent", 0))
+    memory = float(stats.get("memory_percent", 0))
+    disk = float(stats.get("disk_percent", 0))
+    level = "healthy"
+    if cpu > 80 or memory > 80 or disk > 80:
+        level = "warning"
+    return {
+        "status": level,
+        "cpu": cpu,
+        "memory": memory,
+        "disk": disk,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "bot_name": BOT_NAME,
+    }
