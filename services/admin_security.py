@@ -2,6 +2,8 @@ import os
 
 TELEGRAM_ADMIN_ID = os.getenv("TELEGRAM_ADMIN_ID", "")
 WHATSAPP_ADMIN_ID = os.getenv("WHATSAPP_ADMIN_ID", "")
+DASHBOARD_ADMIN_USER = os.getenv("DASHBOARD_ADMIN_USER", "admin")
+DASHBOARD_ADMIN_PASS = os.getenv("DASHBOARD_ADMIN_PASS", "admin123")
 
 
 def _normalize_list(value: str):
@@ -25,7 +27,6 @@ def is_authorized(source: str, user_id: str) -> bool:
         return normalized in AUTHORIZED_TELEGRAM_IDS
 
     if source == "whatsapp":
-        # Accept both raw numbers and Twilio-style whatsapp: prefix
         if normalized.startswith("whatsapp:"):
             normalized = normalized.replace("whatsapp:", "", 1)
         return normalized in AUTHORIZED_WHATSAPP_IDS
