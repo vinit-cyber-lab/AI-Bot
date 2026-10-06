@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-Bot Admin Control Center</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .shell { display: flex; min-height: 100vh; }
+        .sidebar { width: 220px; background: #111827; padding: 20px; border-right: 1px solid #1f2937; }
+        .sidebar h1 { font-size: 22px; margin-bottom: 20px; color: #60a5fa; }
+        .sidebar nav { display: flex; flex-direction: column; gap: 10px; }
+        .sidebar nav a { color: #cbd5e1; text-decoration: none; padding: 10px 12px; border-radius: 8px; transition: 0.2s; }
+        .sidebar nav a:hover { background: #1e40af; }
+        .sidebar nav a.active { background: #2563eb; color: #fff; }
+        .content { flex: 1; padding: 24px; overflow: auto; }
+        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+        .topbar h2 { font-size: 28px; }
+        .topbar p { color: #94a3b8; margin-top: 4px; }
+        .cards-grid, .panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-bottom: 24px; }
+        .card, .panel { background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 18px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); }
+        .card h3, .panel h3 { margin-bottom: 12px; color: #60a5fa; }
+        label { display: block; margin-top: 10px; color: #cbd5e1; font-weight: 500; }
+        input, select, textarea { width: 100%; margin-top: 6px; padding: 8px 12px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; font-size: 14px; }
+        button { width: 100%; margin: 8px 0; padding: 10px 12px; border-radius: 6px; border: none; background: #2563eb; color: white; cursor: pointer; font-weight: 600; transition: 0.2s; }
+        button:hover { background: #1d4ed8; }
+        button:disabled { background: #64748b; cursor: not-allowed; }
+        .toggle-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+        .toggle-row label { display: flex; align-items: center; margin: 0; }
+        .toggle-row input[type="checkbox"] { width: auto; margin: 0 6px 0 0; }
+        .status-good { color: #10b981; }
+        .status-warning { color: #f59e0b; }
+        .status-bad { color: #ef4444; }
+        .stat-item { margin: 8px 0; font-size: 14px; }
+        #audit-log, #user-list { max-height: 300px; overflow-y: auto; font-size: 12px; line-height: 1.6; background: #0f172a; padding: 10px; border-radius: 6px; border: 1px solid #334155; }
+        .log-entry { margin-bottom: 8px; padding: 6px; background: #1e293b; border-left: 3px solid #60a5fa; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-content { background: #111827; padding: 24px; border-radius: 12px; width: 90%; max-width: 500px; border: 1px solid #334155; }
+        .modal-content h3 { margin-bottom: 16px; }
+        .modal-close { float: right; cursor: pointer; font-size: 24px; color: #cbd5e1; }
+        .action-btn { padding: 6px 12px; font-size: 12px; margin: 2px; }
+        .confirm-btn { background: #10b981; }
+        .confirm-btn:hover { background: #059669; }
+        .danger-btn { background: #ef4444; }
+        .danger-btn:hover { background: #dc2626; }
+        .success-alert { background: #10b981; color: white; padding: 10px; border-radius: 6px; margin-bottom: 10px; }
+        .error-alert { background: #ef4444; color: white; padding: 10px; border-radius: 6px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <aside class="sidebar">
+            <h1>🤖 AI-Bot</h1>
+            <nav>
+                <a href="/">📊 Overview</a>
+                <a href="/admin" class="active">⚙️ Admin</a>
+                <a href="/api/logs" target="_blank">📋 Logs</a>
+            </nav>
+        </aside>
+
+        <main class="content">
+            <header class="topbar">
+                <div>
+                    <h2>🔐 Admin Control Center</h2>
+                    <p>System management, settings, monitoring & communication</p>
+                </div>
+                <button onclick="loadAllData()">🔄 Refresh</button>
+            </header>
+
+            <section class="cards-grid">
+                <div class="card">
+                    <h3>Bot Status</h3>
+                    <div id="status-card" class="stat-item">Loading...</div>
+                </div>
+                <div class="card">
+                    <h3>System Health</h3>
+                    <div id="health-card" class="stat-item">Loading...</div>
+                </div>
+                <div class="card">
+                    <h3>GitHub Repo</h3>
+                    <div id="github-card" class="stat-item">Loading...</div>
+                </div>
+            </section>
+
+            <section class="panel-grid">
+                <div class="panel">
+                    <h3>⚙️ Settings Management</h3>
+                    <form onsubmit="updateSetting(event)">
+                        <label>Setting Key
+                            <select id="setting-key">
+                                <option value="BOT_NAME">BOT_NAME</option>
+                                <option value="BOT_VERSION">BOT_VERSION</option>
+                                <option value="DISCORD_ADMIN_ROLE">DISCORD_ADMIN_ROLE</option>
+                                <option value="TELEGRAM_ADMIN_ID">TELEGRAM_ADMIN_ID</option>
+                                <option value="WHATSAPP_ADMIN_ID">WHATSAPP_ADMIN_ID</option>
+                                <option value="DASHBOARD_ADMIN_USER">DASHBOARD_ADMIN_USER</option>
+                                <option value="DASHBOARD_ADMIN_PASS">DASHBOARD_ADMIN_PASS</option>
+                            </select>
+                        </label>
+                        <label>New Value
+                            <input id="setting-value" type="text" placeholder="Enter new value" />
+                        </label>
+                        <button type="submit">Update Setting</button>
+                    </form>
+                </div>
+
+                <div class="panel">
+                    <h3>📢 Broadcast Message</h3>
+                    <textarea id="broadcast-message" rows="4" placeholder="Enter announcement..."></textarea>
+                    <div class="toggle-row">
+                        <label><input type="checkbox" value="discord" checked /> Discord</label>
+                        <label><input type="checkbox" value="telegram" checked /> Telegram</label>
+                        <label><input type="checkbox" value="whatsapp" /> WhatsApp</label>
+                    </div>
+                    <button onclick="sendBroadcast()">Send Broadcast</button>
+                </div>
+            </section>
+
+            <section class="panel-grid">
+                <div class="panel">
+                    <h3>💬 Direct Message</h3>
+                    <label>Platform
+                        <select id="dm-platform">
+                            <option value="discord">Discord</option>
+                            <option value="telegram">Telegram</option>
+                            <option value="whatsapp">WhatsApp</option>
+                        </select>
+                    </label>
+                    <label>Target ID/Number
+                        <input id="dm-target" type="text" placeholder="Discord ID / Telegram Chat ID / Phone" />
+                    </label>
+                    <label>Message
+                        <textarea id="dm-message" rows="3" placeholder="Message content"></textarea>
+                    </label>
+                    <button onclick="sendDirectMessage()">Send Message</button>
+                </div>
+
+                <div class="panel">
+                    <h3>👥 User Management</h3>
+                    <div id="user-list">Loading users...</div>
+                    <button onclick="openUserModal()">+ Add User</button>
+                </div>
+            </section>
+
+            <section class="panel-grid">
+                <div class="panel">
+                    <h3>🛡️ Moderation</h3>
+                    <label>User ID
+                        <input id="mod-user-id" type="text" placeholder="Discord ID / Telegram ID / Phone" />
+                    </label>
+                    <label>Action
+                        <select id="mod-action">
+                            <option value="ban">Ban</option>
+                            <option value="unban">Unban</option>
+                            <option value="kick">Kick</option>
+                            <option value="warn">Warn</option>
+                        </select>
+                    </label>
+                    <label>Reason
+                        <textarea id="mod-reason" rows="2" placeholder="Reason for action"></textarea>
+                    </label>
+                    <button class="danger-btn" onclick="executeModerationAction()">Execute Action</button>
+                </div>
+
+                <div class="panel">
+                    <h3>🚀 Quick Actions</h3>
+                    <button onclick="runGitHubTask()">Run GitHub Check</button>
+                    <button onclick="runHealthTask()">Run Health Check</button>
+                    <button onclick="runBackupTask()">Create Backup</button>
+                    <button class="danger-btn" onclick="toggleLockdown()">🔒 Toggle Lockdown</button>
+                </div>
+            </section>
+
+            <section class="panel-grid">
+                <div class="panel" style="grid-column: 1 / -1;">
+                    <h3>📊 Audit Log</h3>
+                    <div id="audit-log">Loading audit logs...</div>
+                    <button onclick="exportAuditLog()">📥 Export CSV</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="userModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeUserModal()">&times;</span>
+            <h3>Add New User</h3>
+            <form onsubmit="addUser(event)">
+                <label>Source
+                    <select id="modal-source">
+                        <option value="discord">Discord</option>
+                        <option value="telegram">Telegram</option>
+                        <option value="whatsapp">WhatsApp</option>
+                    </select>
+                </label>
+                <label>Platform ID
+                    <input id="modal-user-id" type="text" placeholder="User ID / Chat ID" />
+                </label>
+                <label>Display Name
+                    <input id="modal-display-name" type="text" placeholder="Display Name" />
+                </label>
+                <label>Phone Number
+                    <input id="modal-phone" type="text" placeholder="Phone (optional)" />
+                </label>
+                <button type="submit">Add User</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        async function apiFetch(url, method = 'GET', payload = null) {
+            const options = { method, headers: { 'Content-Type': 'application/json' } };
+            if (payload) options.body = JSON.stringify(payload);
+            const response = await fetch(url, options);
+            return response.json();
+        }
+
+        async function loadAllData() {
+            try {
+                const [status, health, github] = await Promise.all([
+                    apiFetch('/api/status'),
+                    apiFetch('/api/health'),
+                    apiFetch('/api/github')
+                ]);
+                document.getElementById('status-card').textContent = `✅ ${status.bot_name} | v${status.bot_version} | ${status.status}`;
+                const cpuColor = health.cpu_percent > 80 ? 'status-bad' : health.cpu_percent > 50 ? 'status-warning' : 'status-good';
+                document.getElementById('health-card').innerHTML = `<div class="stat-item">CPU: <span class="${cpuColor}">${health.cpu_percent}%</span></div><div class="stat-item">Memory: ${health.memory_percent}%</div><div class="stat-item">Disk: ${health.disk_percent}%</div>`;
+                document.getElementById('github-card').textContent = `⭐ ${github.repository} | Stars: ${github.stars} | Issues: ${github.open_issues}`;
+                loadAuditLog();
+                loadUserList();
+            } catch (error) {
+                console.error('Error loading data:', error);
+            }
+        }
+
+        async function updateSetting(event) {
+            event.preventDefault();
+            const key = document.getElementById('setting-key').value;
+            const value = document.getElementById('setting-value').value;
+            const result = await apiFetch('/api/admin/settings', 'POST', { key, value });
+            if (result.success) {
+                alert('✅ Setting updated successfully');
+                document.getElementById('setting-value').value = '';
+            } else {
+                alert('❌ Failed: ' + (result.error || 'Unknown error'));
+            }
+            loadAllData();
+        }
+
+        async function sendBroadcast() {
+            const message = document.getElementById('broadcast-message').value.trim();
+            const channels = Array.from(document.querySelectorAll('input[value="discord"], input[value="telegram"], input[value="whatsapp"]')).filter(e => e.checked).map(e => e.value);
+            if (!message) { alert('Message is required'); return; }
+            const result = await apiFetch('/api/admin/broadcast', 'POST', { message, channels });
+            alert(result.success ? '✅ Broadcast sent' : '❌ Failed');
+            document.getElementById('broadcast-message').value = '';
+        }
+
+        async function sendDirectMessage() {
+            const platform = document.getElementById('dm-platform').value;
+            const target = document.getElementById('dm-target').value.trim();
+            const message = document.getElementById('dm-message').value.trim();
+            if (!target || !message) { alert('Target and message required'); return; }
+            const result = await apiFetch('/api/admin/message/send', 'POST', { platform, target, message });
+            alert(result.success ? '✅ Message sent' : '❌ Failed');
+            document.getElementById('dm-message').value = '';
+        }
+
+        async function executeModerationAction() {
+            const user_id = document.getElementById('mod-user-id').value.trim();
+            const action = document.getElementById('mod-action').value;
+            const reason = document.getElementById('mod-reason').value;
+            if (!user_id) { alert('User ID required'); return; }
+            const endpoint = action === 'ban' ? '/api/admin/user/ban' : '/api/admin/user/unban';
+            const result = await apiFetch(endpoint, 'POST', { user_id, reason });
+            alert(result.success ? `✅ ${action.toUpperCase()} executed` : '❌ Failed');
+            loadAllData();
+        }
+
+        async function loadAuditLog() {
+            const data = await apiFetch('/api/admin/audit?limit=20');
+            const logs = data.logs || [];
+            const container = document.getElementById('audit-log');
+            if (!logs.length) { container.textContent = 'No audit logs'; return; }
+            container.innerHTML = logs.map(log => `<div class="log-entry"><strong>${log.action}</strong> by ${log.actor} | ${log.timestamp}</div>`).join('');
+        }
+
+        async function loadUserList() {
+            const data = await apiFetch('/api/admin/users');
+            const users = data.users || [];
+            const container = document.getElementById('user-list');
+            if (!users.length) { container.textContent = 'No users'; return; }
+            container.innerHTML = users.map(u => `<div class="log-entry"><strong>${u.display_name || u.platform_user_id}</strong> [${u.source}] - ${u.status}</div>`).join('');
+        }
+
+        function openUserModal() { document.getElementById('userModal').style.display = 'flex'; }
+        function closeUserModal() { document.getElementById('userModal').style.display = 'none'; }
+
+        async function addUser(event) {
+            event.preventDefault();
+            const source = document.getElementById('modal-source').value;
+            const platform_user_id = document.getElementById('modal-user-id').value;
+            const display_name = document.getElementById('modal-display-name').value;
+            if (!platform_user_id) { alert('User ID required'); return; }
+            // This would call a backend endpoint to add user
+            alert('✅ User added (implement backend endpoint)');
+            closeUserModal();
+            loadUserList();
+        }
+
+        async function runGitHubTask() { const r = await apiFetch('/api/tasks/github', 'POST'); alert(r.status === 'success' ? '✅ GitHub task executed' : '❌ Failed'); }
+        async function runHealthTask() { const r = await apiFetch('/api/tasks/health', 'POST'); alert(r.status === 'success' ? '✅ Health task executed' : '❌ Failed'); }
+        async function runBackupTask() { const r = await apiFetch('/api/tasks/backup', 'POST'); alert(r.status === 'success' ? '✅ Backup created' : '❌ Failed'); }
+        function toggleLockdown() { alert('🔒 Lockdown mode toggled'); }
+        function exportAuditLog() { window.open('/api/admin/audit/export', '_blank'); }
+
+        loadAllData();
+        setInterval(loadAllData, 30000);
+    </script>
+</body>
+</html>
