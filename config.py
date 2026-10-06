@@ -16,6 +16,16 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 GITHUB_CHECK_INTERVAL_MINUTES = int(os.getenv("GITHUB_CHECK_INTERVAL_MINUTES", "5"))
 HEALTH_CHECK_INTERVAL_MINUTES = int(os.getenv("HEALTH_CHECK_INTERVAL_MINUTES", "10"))
+BACKUP_INTERVAL_MINUTES = int(os.getenv("BACKUP_INTERVAL_MINUTES", "60"))
 BACKUP_INTERVAL_HOURS = int(os.getenv("BACKUP_INTERVAL_HOURS", "1"))
 DAILY_SUMMARY_TIME = os.getenv("DAILY_SUMMARY_TIME", "09:00")
 APP_ENV = os.getenv("APP_ENV", "development")
+
+# Dashboard settings
+DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
+DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5000"))
+DASHBOARD_DEBUG = os.getenv("DASHBOARD_DEBUG", "True").lower() == "true"
+
+# Admin credentials (basic auth support)
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
