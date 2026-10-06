@@ -1,0 +1,27 @@
+import json
+from datetime import datetime
+from pathlib import Path
+
+LOG_PATH = Path("logs/command_audit.log")
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def log_command(source: str, command: str, user: str, message: str, success: bool, metadata=None):
+    entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "source": source,
+        "command": command,
+        "user": user,
+        "success": success,
+        "message": message,
+        "metadata": metadata or {},
+    }
+
+    with LOG_PATH.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    return str(LOG_PATH)
+
+
+if __name__ == "__main__":
+    log_command("system", "startup", "launcher", "Command logger initialized", True)

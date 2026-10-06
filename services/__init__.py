@@ -1,149 +1,228 @@
-import json
 import os
-import time
 from datetime import datetime
 
-import schedule
+import discord
+from discord import app_commands
+from discord.ext import commands
 
-from config import (
-    APP_ENV,
-    BACKUP_INTERVAL_HOURS,
-    BOT_NAME,
-    BOT_VERSION,
-    DAILY_SUMMARY_TIME,
-    DISCORD_WEBHOOK_URL,
-    GITHUB_CHECK_INTERVAL_MINUTES,
-    GITHUB_REPO,
-    HEALTH_CHECK_INTERVAL_MINUTES,
-    TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID,
-)
+from config import DISCORD_ADMIN_ROLE, DISCORD_ALLOWED_USER_IDS, DISCORD_BOT_TOKEN, DISCORD_GUILD_ID
+from services.command_logger import log_command
+from services.discord_formatter import build_embed
+from services.discord_notifications import send_discord_alert
 from services.github_service import fetch_repo_summary
-from services.notifications import send_all
 from services.system_service import get_system_status
+from bot import backup_task, github_monitor_task, system_health_task
 
 
-BACKUP_DIR = "backups"
-LOG_DIR = "logs"
-DATA_DIR = "data"
+ALLOWED_USERS = {item.strip() for item in (DISCORD_ALLOWED_USER_IDS or "").split(",") if item.strip()}
 
 
-def ensure_directories():
-    for directory in [BACKUP_DIR, LOG_DIR, DATA_DIR]:
-        os.makedirs(directory, exist_ok=True)
+class DiscordBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.guilds = True
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def on_ready(self):
+        print(f"Logged in as {self.user} ({self.user.id})")
+        try:
+            synced = await self.tree.sync()
+            print(f"Synced {len(synced)} commands")
+        except Exception as exc:
+            print(f"Failed to sync commands: {exc}")
+
+    async def has_admin_access(self, interaction):
+        if str(interaction.user.id) in ALLOWED_USERS:
+            return True
+
+        if not interaction.guild:
+            return False
+
+        member = interaction.guild.get_member(interaction.user.id)
+        if not member:
+            return False
+
+        role_names = {role.name.lower() for role in member.roles}
+        return DISCORD_ADMIN_ROLE.lower() in role_names
 
 
-def create_backup_file() -> str:
-    ensure_directories()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"backup_{timestamp}.json")
-    payload = {
-        "timestamp": datetime.now().isoformat(),
-        "bot_name": BOT_NAME,
-        "bot_version": BOT_VERSION,
-        "application_env": APP_ENV,
-        "status": "healthy",
-    }
-    with open(backup_path, "w", encoding="utf-8") as file:
-        json.dump(payload, file, indent=2)
-    return backup_path
+bot = DiscordBot()
 
 
-def github_monitor_task():
-    repo_info = fetch_repo_summary(GITHUB_REPO)
-    if not repo_info:
-        message = f"[{BOT_NAME}] GitHub monitor failed: no data returned."
-        send_all(message)
+async def log_interaction(interaction, command_name, result, success=True):
+    user_name = getattr(interaction.user, "display_name", str(interaction.user))
+    log_command("discord", command_name, user_name, result, success)
+
+
+@bot.tree.command(name="status", description="Check AI-Bot status")
+async def status(interaction: discord.Interaction):
+    if not await bot.has_admin_access(interaction):
+        await interaction.response.send_message("❌ Unauthorized access.", ephemeral=True)
+        await log_interaction(interaction, "status", "Unauthorized access", False)
         return
 
-    message = (
-        f"[{BOT_NAME}] GitHub status\n"
-        f"Repository: {repo_info.get('full_name', GITHUB_REPO)}\n"
-        f"Default branch: {repo_info.get('default_branch', 'unknown')}\n"
-        f"Open issues: {repo_info.get('open_issues_count', 0)}\n"
-        f"Stars: {repo_info.get('stargazers_count', 0)}\n"
-        f"Forks: {repo_info.get('forks_count', 0)}\n"
-        f"Last push: {repo_info.get('pushed_at', 'unknown')}\n"
-        f"Visibility: {repo_info.get('visibility', 'unknown')}"
+    embed = build_embed("AI-Bot Status", "✅ AI-Bot is running and monitoring tasks.", color=0x00AA00)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await log_interaction(interaction, "status", "Status displayed", True)
+
+
+@bot.tree.command(name="github", description="View GitHub repository info")
+async def github(interaction: discord.Interaction):
+    if not await bot.has_admin_access(interaction):
+        await interaction.response.send_message("❌ Unauthorized access.", ephemeral=True)
+        await log_interaction(interaction, "github", "Unauthorized access", False)
+        return
+
+    repo = fetch_repo_summary("vinit-cyber-lab/AI-Bot")
+    if not repo:
+        await interaction.response.send_message("❌ GitHub data unavailable.", ephemeral=True)
+        await log_interaction(interaction, "github", "GitHub data unavailable", False)
+        return
+
+    embed = build_embed(
+        repo.get("full_name", "AI-Bot"),
+        repo.get("description", "No description available."),
+        color=0x5865F2,
+        fields=[
+            {"name": "Stars", "value": str(repo.get("stargazers_count", 0)), "inline": True},
+            {"name": "Forks", "value": str(repo.get("forks_count", 0)), "inline": True},
+            {"name": "Open Issues", "value": str(repo.get("open_issues_count", 0)), "inline": True},
+            {"name": "Last Push", "value": str(repo.get("pushed_at", "N/A")), "inline": False},
+        ],
     )
-    print(message)
-    send_all(message)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await log_interaction(interaction, "github", "GitHub stats displayed", True)
 
 
-def system_health_task():
+@bot.tree.command(name="health", description="Check system health")
+async def health(interaction: discord.Interaction):
+    if not await bot.has_admin_access(interaction):
+        await interaction.response.send_message("❌ Unauthorized access.", ephemeral=True)
+        await log_interaction(interaction, "health", "Unauthorized access", False)
+        return
+
     stats = get_system_status()
     if not stats:
-        message = f"[{BOT_NAME}] System health check failed."
-        send_all(message)
+        await interaction.response.send_message("❌ System health unavailable.", ephemeral=True)
+        await log_interaction(interaction, "health", "System health unavailable", False)
         return
 
-    message = (
-        f"[{BOT_NAME}] System health\n"
-        f"CPU: {stats.get('cpu_percent', 0)}%\n"
-        f"Memory: {stats.get('memory_percent', 0)}%\n"
-        f"Disk: {stats.get('disk_percent', 0)}%\n"
-        f"Platform: {stats.get('platform', 'unknown')}"
+    embed = build_embed(
+        "System Health",
+        "Live system health metrics",
+        color=0x00AA00,
+        fields=[
+            {"name": "CPU", "value": f"{stats.get('cpu_percent', 0)}%", "inline": True},
+            {"name": "Memory", "value": f"{stats.get('memory_percent', 0)}%", "inline": True},
+            {"name": "Disk", "value": f"{stats.get('disk_percent', 0)}%", "inline": True},
+            {"name": "Platform", "value": str(stats.get("platform", "N/A")), "inline": False},
+        ],
     )
-    print(message)
-    send_all(message)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await log_interaction(interaction, "health", "Health stats displayed", True)
 
 
-def backup_task():
-    backup_path = create_backup_file()
-    message = f"[{BOT_NAME}] Backup created successfully: {backup_path}"
-    print(message)
-    send_all(message)
+@bot.tree.command(name="backup", description="Trigger a backup task")
+async def backup_cmd(interaction: discord.Interaction):
+    if not await bot.has_admin_access(interaction):
+        await interaction.response.send_message("❌ Unauthorized access.", ephemeral=True)
+        await log_interaction(interaction, "backup", "Unauthorized access", False)
+        return
+
+    try:
+        path = backup_task()
+        await interaction.response.send_message(f"✅ Backup triggered successfully: `{path}`", ephemeral=True)
+        await log_interaction(interaction, "backup", f"Backup created at {path}", True)
+    except Exception as exc:
+        await interaction.response.send_message(f"❌ Backup failed: {exc}", ephemeral=True)
+        await log_interaction(interaction, "backup", f"Backup failed: {exc}", False)
 
 
-def daily_summary_task():
-    repo_info = fetch_repo_summary(GITHUB_REPO)
-    system_stats = get_system_status()
-    repo_name = repo_info.get("full_name", GITHUB_REPO) if repo_info else GITHUB_REPO
-    system_line = (
-        f"CPU: {system_stats.get('cpu_percent', 0)}% | "
-        f"Memory: {system_stats.get('memory_percent', 0)}% | "
-        f"Disk: {system_stats.get('disk_percent', 0)}%"
+@bot.tree.command(name="logs", description="View recent bot logs")
+async def logs(interaction: discord.Interaction):
+    if not await bot.has_admin_access(interaction):
+        await interaction.response.send_message("❌ Unauthorized access.", ephemeral=True)
+        await log_interaction(interaction, "logs", "Unauthorized access", False)
+        return
+
+    try:
+        with open("logs/bot.log", "r", encoding="utf-8") as file:
+            content = "".join(file.readlines()[-20:]) or "No logs available yet."
+        await interaction.response.send_message(f"```\n{content}\n```", ephemeral=True)
+        await log_interaction(interaction, "logs", "Logs displayed", True)
+    except Exception:
+        await interaction.response.send_message("No logs found yet.", ephemeral=True)
+        await log_interaction(interaction, "logs", "No logs found", False)
+
+
+@bot.tree.command(name="run", description="Run a bot task")
+async def run_task(interaction: discord.Interaction, task_name: str):
+    if not await bot.has_admin_access(interaction):
+        await interaction.response.send_message("❌ Unauthorized access.", ephemeral=True)
+        await log_interaction(interaction, "run", "Unauthorized access", False)
+        return
+
+    task_name = task_name.lower().strip()
+    if task_name == "github":
+        try:
+            github_monitor_task()
+            await interaction.response.send_message("✅ GitHub task executed.", ephemeral=True)
+            await log_interaction(interaction, "run", "GitHub task executed", True)
+        except Exception as exc:
+            await interaction.response.send_message(f"❌ GitHub task failed: {exc}", ephemeral=True)
+            await log_interaction(interaction, "run", f"GitHub task failed: {exc}", False)
+        return
+
+    if task_name == "health":
+        try:
+            system_health_task()
+            await interaction.response.send_message("✅ Health task executed.", ephemeral=True)
+            await log_interaction(interaction, "run", "Health task executed", True)
+        except Exception as exc:
+            await interaction.response.send_message(f"❌ Health task failed: {exc}", ephemeral=True)
+            await log_interaction(interaction, "run", f"Health task failed: {exc}", False)
+        return
+
+    if task_name == "backup":
+        try:
+            path = backup_task()
+            await interaction.response.send_message(f"✅ Backup task executed: `{path}`", ephemeral=True)
+            await log_interaction(interaction, "run", f"Backup task executed: {path}", True)
+        except Exception as exc:
+            await interaction.response.send_message(f"❌ Backup task failed: {exc}", ephemeral=True)
+            await log_interaction(interaction, "run", f"Backup task failed: {exc}", False)
+        return
+
+    await interaction.response.send_message("❌ Unknown task. Use: github, health, backup", ephemeral=True)
+    await log_interaction(interaction, "run", f"Unknown task: {task_name}", False)
+
+
+@bot.tree.command(name="help", description="Show Discord command list")
+async def help_cmd(interaction: discord.Interaction):
+    if not await bot.has_admin_access(interaction):
+        await interaction.response.send_message("❌ Unauthorized access.", ephemeral=True)
+        await log_interaction(interaction, "help", "Unauthorized access", False)
+        return
+
+    help_text = (
+        "**Available commands**\n"
+        "/status\n"
+        "/github\n"
+        "/health\n"
+        "/backup\n"
+        "/logs\n"
+        "/run github\n"
+        "/run health\n"
+        "/run backup\n"
+        "/help"
     )
-    message = (
-        f"[{BOT_NAME}] Daily summary\n"
-        f"Repository: {repo_name}\n"
-        f"Open issues: {repo_info.get('open_issues_count', 0) if repo_info else 'n/a'}\n"
-        f"Stars: {repo_info.get('stargazers_count', 0) if repo_info else 'n/a'}\n"
-        f"System: {system_line}"
-    )
-    print(message)
-    send_all(message)
-
-
-def schedule_tasks():
-    schedule.every(GITHUB_CHECK_INTERVAL_MINUTES).minutes.do(github_monitor_task)
-    schedule.every(HEALTH_CHECK_INTERVAL_MINUTES).minutes.do(system_health_task)
-    schedule.every(BACKUP_INTERVAL_HOURS).hours.do(backup_task)
-    schedule.every().day.at(DAILY_SUMMARY_TIME).do(daily_summary_task)
-
-
-def startup_notification():
-    message = (
-        f"[{BOT_NAME}] v{BOT_VERSION} successfully started.\n"
-        f"Environment: {APP_ENV}\n"
-        f"Watching repo: {GITHUB_REPO}"
-    )
-    send_all(message)
-
-
-def run_bot():
-    ensure_directories()
-    schedule_tasks()
-    startup_notification()
-    print(f"{BOT_NAME} running. Press Ctrl+C to exit.")
-
-    while True:
-        schedule.run_pending()
-        time.sleep(5)
+    await interaction.response.send_message(help_text, ephemeral=True)
+    await log_interaction(interaction, "help", "Help listed", True)
 
 
 if __name__ == "__main__":
-    try:
-        run_bot()
-    except KeyboardInterrupt:
-        print(f"{BOT_NAME} shutting down gracefully.")
+    if not DISCORD_BOT_TOKEN:
+        print("DISCORD_BOT_TOKEN is missing. Discord bot is disabled.")
+    else:
+        bot.run(DISCORD_BOT_TOKEN)

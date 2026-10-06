@@ -1,0 +1,135 @@
+import os
+import zipfile
+from datetime import datetime
+from pathlib import Path
+
+from config import BOT_NAME, GITHUB_REPO
+from services.command_logger import log_command
+from services.discord_notifications import send_discord_alert
+from services.github_service import fetch_repo_summary, send_all
+from services.system_service import get_system_status
+
+
+BACKUP_DIR = Path("backups")
+BACKUP_DIR.mkdir(exist_ok=True)
+
+
+def backup_task():
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = BACKUP_DIR / f"ai-bot-backup-{timestamp}.zip"
+    files_to_backup = [
+        Path("logs"),
+        Path("data"),
+        Path("config.py"),
+        Path("app.py"),
+        Path("telegram_bot.py"),
+        Path("discord_bot.py"),
+    ]
+
+    with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for item in files_to_backup:
+            if item.exists():
+                archive.write(item, item.name)
+
+    log_command("system", "backup", "scheduler", f"Created backup {backup_path.name}", True)
+    send_all(f"✅ Backup created: {backup_path.name}")
+    send_discord_alert(
+        title="Backup Complete",
+        description=f"Backup archive created: `{backup_path.name}`",
+        color=0x00AA00,
+    )
+    return str(backup_path)
+
+
+def github_monitor_task():
+    repo = fetch_repo_summary(GITHUB_REPO)
+    if not repo:
+        log_command("system", "run github", "scheduler", "GitHub fetch failed", False)
+        send_discord_alert(
+            title="GitHub Check Failed",
+            description="Repository data could not be retrieved.",
+            color=0xFFAA00,
+        )
+        return None
+
+    log_command(
+        "system",
+        "run github",
+        "scheduler",
+        f"GitHub stats checked for {GITHUB_REPO}",
+        True,
+        {"stars": repo.get("stargazers_count", 0), "forks": repo.get("forks_count", 0)},
+    )
+    send_all(
+        f"📦 GitHub status: {repo.get('full_name', GITHUB_REPO)} | "
+        f"Stars {repo.get('stargazers_count', 0)} | Forks {repo.get('forks_count', 0)}"
+    )
+    send_discord_alert(
+        title="GitHub Status",
+        description=f"Repository: `{repo.get('full_name', GITHUB_REPO)}`",
+        color=0x5865F2,
+        fields=[
+            {"name": "Stars", "value": str(repo.get("stargazers_count", 0)), "inline": True},
+            {"name": "Forks", "value": str(repo.get("forks_count", 0)), "inline": True},
+            {"name": "Open Issues", "value": str(repo.get("open_issues_count", 0)), "inline": True},
+        ],
+    )
+    return repo
+
+
+def system_health_task():
+    stats = get_system_status()
+    if not stats:
+        log_command("system", "run health", "scheduler", "Health check failed", False)
+        send_discord_alert(
+            title="Health Check Failed",
+            description="System metrics could not be collected.",
+            color=0xFF5555,
+        )
+        return None
+
+    cpu = stats.get("cpu_percent", 0)
+    memory = stats.get("memory_percent", 0)
+    disk = stats.get("disk_percent", 0)
+
+    log_command(
+        "system",
+        "run health",
+        "scheduler",
+        "System health check completed",
+        True,
+        {"cpu": cpu, "memory": memory, "disk": disk},
+    )
+
+    if cpu > 80 or memory > 80 or disk > 80:
+        send_discord_alert(
+            title="High Resource Usage",
+            description="The system is running close to capacity.",
+            color=0xFFAA00,
+            fields=[
+                {"name": "CPU", "value": f"{cpu}%", "inline": True},
+                {"name": "Memory", "value": f"{memory}%", "inline": True},
+                {"name": "Disk", "value": f"{disk}%", "inline": True},
+            ],
+        )
+    else:
+        send_discord_alert(
+            title="System Health OK",
+            description="All monitored metrics are within expected range.",
+            color=0x00AA00,
+            fields=[
+                {"name": "CPU", "value": f"{cpu}%", "inline": True},
+                {"name": "Memory", "value": f"{memory}%", "inline": True},
+                {"name": "Disk", "value": f"{disk}%", "inline": True},
+            ],
+        )
+    return stats
+
+
+def send_status_alert(message: str):
+    send_all(message)
+    send_discord_alert(title=f"{BOT_NAME} Alert", description=message, color=0x5865F2)
+
+
+if __name__ == "__main__":
+    send_status_alert(f"{BOT_NAME} task runner started.")

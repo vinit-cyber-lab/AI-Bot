@@ -1,0 +1,43 @@
+import argparse
+import subprocess
+import sys
+
+
+def run_process(script_name):
+    return subprocess.Popen([sys.executable, script_name])
+
+
+def main():
+    parser = argparse.ArgumentParser(description="AI-Bot unified launcher")
+    parser.add_argument("--all", action="store_true", help="Run all platforms")
+    parser.add_argument("--discord", action="store_true", help="Run Discord bot")
+    parser.add_argument("--telegram", action="store_true", help="Run Telegram bot")
+    parser.add_argument("--whatsapp", action="store_true", help="Run WhatsApp webhook app")
+    parser.add_argument("--dashboard", action="store_true", help="Run dashboard")
+    args = parser.parse_args()
+
+    if not any([args.all, args.discord, args.telegram, args.whatsapp, args.dashboard]):
+        parser.print_help()
+        return
+
+    if args.all or args.discord:
+        run_process("discord_bot.py")
+    if args.all or args.telegram:
+        run_process("telegram_bot.py")
+    if args.all or args.dashboard:
+        run_process("app.py")
+    if args.all or args.whatsapp:
+        print("WhatsApp webhook is handled via the dashboard app and Twilio webhook routes.")
+
+    print("AI-Bot unified launcher is running. Press Ctrl+C to stop.")
+    while True:
+        try:
+            import time
+            time.sleep(1)
+        except KeyboardInterrupt:
+            print("Shutting down launcher...")
+            break
+
+
+if __name__ == "__main__":
+    main()
