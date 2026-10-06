@@ -11,6 +11,11 @@ GITHUB_REPO = os.getenv("GITHUB_REPO", "vinit-cyber-lab/AI-Bot")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+DISCORD_GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0") or 0)
+DISCORD_ADMIN_ROLE = os.getenv("DISCORD_ADMIN_ROLE", "Admin")
+DISCORD_ALLOWED_USER_IDS = os.getenv("DISCORD_ALLOWED_USER_IDS", "")
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -29,3 +34,9 @@ DASHBOARD_DEBUG = os.getenv("DASHBOARD_DEBUG", "True").lower() == "true"
 # Admin credentials (basic auth support)
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+
+# Security allowlists
+TELEGRAM_ADMIN_ID = os.getenv("TELEGRAM_ADMIN_ID", "")
+WHATSAPP_ADMIN_ID = os.getenv("WHATSAPP_ADMIN_ID", "")
+DASHBOARD_ADMIN_USER = os.getenv("DASHBOARD_ADMIN_USER", "admin")
+DASHBOARD_ADMIN_PASS = os.getenv("DASHBOARD_ADMIN_PASS", "admin123")
