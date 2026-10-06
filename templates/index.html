@@ -1,336 +1,344 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ status.bot_name }} Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <div class="sidebar">
-        <div class="logo">
-            <h2>🤖 {{ status.bot_name }}</h2>
-            <p>v{{ status.bot_version }}</p>
-        </div>
-        <nav>
-            <ul>
-                <li><a href="#" onclick="loadDashboard()" class="active">Dashboard</a></li>
-                <li><a href="#" onclick="loadGitHub()">GitHub</a></li>
-                <li><a href="#" onclick="loadHealth()">System Health</a></li>
-                <li><a href="#" onclick="loadSettings()">Settings</a></li>
-            </ul>
-        </nav>
-    </div>
+import os
+import json
+from datetime import datetime
+from flask import Flask, render_template, request, jsonify, send_file
+from functools import wraps
+from config import (
+    BOT_NAME,
+    BOT_VERSION,
+    DASHBOARD_HOST,
+    DASHBOARD_PORT,
+    DASHBOARD_DEBUG,
+    ADMIN_USERNAME,
+    ADMIN_PASSWORD,
+    GITHUB_REPO,
+)
+from services.github_service import fetch_repo_summary
+from services.system_service import get_system_status
+from bot import (
+    github_monitor_task,
+    system_health_task,
+    backup_task,
+    daily_summary_task,
+)
 
-    <div class="main-content">
-        <div class="header">
-            <h1>Dashboard</h1>
-            <div class="status-badge" id="status-badge">● Running</div>
-        </div>
+app = Flask(__name__)
+app.secret_key = "ai-bot-secret-key-2024"
 
-        <div class="container">
-            <!-- Dashboard View -->
-            <div id="dashboard-view" class="view active">
-                <div class="grid">
-                    <div class="card">
-                        <h3>Bot Status</h3>
-                        <div class="value" id="bot-status">Loading...</div>
-                        <p class="subtitle">Current Status</p>
-                    </div>
-                    <div class="card">
-                        <h3>GitHub Repository</h3>
-                        <div class="value" id="github-repo">Loading...</div>
-                        <p class="subtitle">Stars</p>
-                    </div>
-                    <div class="card">
-                        <h3>CPU Usage</h3>
-                        <div class="value" id="cpu-usage">Loading...</div>
-                        <p class="subtitle">Current</p>
-                    </div>
-                    <div class="card">
-                        <h3>Memory Usage</h3>
-                        <div class="value" id="memory-usage">Loading...</div>
-                        <p class="subtitle">Current</p>
-                    </div>
-                </div>
+LOG_FILE = "logs/bot.log"
 
-                <div class="section">
-                    <h2>Quick Info</h2>
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <span class="label">GitHub Forks:</span>
-                            <span class="value" id="github-forks">-</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="label">Open Issues:</span>
-                            <span class="value" id="github-issues">-</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="label">Disk Usage:</span>
-                            <span class="value" id="disk-usage">-</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="label">Last Updated:</span>
-                            <span class="value" id="last-update">-</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- GitHub View -->
-            <div id="github-view" class="view">
-                <div class="section">
-                    <h2>GitHub Repository Information</h2>
-                    <div class="card-large">
-                        <div class="info-block">
-                            <h3 id="gh-repo-name">Loading...</h3>
-                            <p id="gh-repo-desc" class="description">-</p>
-                            <div class="repo-stats">
-                                <div class="stat">
-                                    <span class="number" id="gh-stars">0</span>
-                                    <span class="label">Stars</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="number" id="gh-forks">0</span>
-                                    <span class="label">Forks</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="number" id="gh-watchers">0</span>
-                                    <span class="label">Watchers</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="number" id="gh-issues">0</span>
-                                    <span class="label">Open Issues</span>
-                                </div>
-                            </div>
-                            <div class="repo-details">
-                                <p><strong>Default Branch:</strong> <span id="gh-branch">-</span></p>
-                                <p><strong>Visibility:</strong> <span id="gh-visibility">-</span></p>
-                                <p><strong>Last Push:</strong> <span id="gh-last-push">-</span></p>
-                                <p><strong>Created:</strong> <span id="gh-created">-</span></p>
-                                <p><a id="gh-url" href="#" target="_blank" class="link">View on GitHub →</a></p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+def append_log(message: str):
+    os.makedirs("logs", exist_ok=True)
+    with open(LOG_FILE, "a", encoding="utf-8") as handle:
+        handle.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
 
-            <!-- Health View -->
-            <div id="health-view" class="view">
-                <div class="section">
-                    <h2>System Health</h2>
-                    <div class="card-large">
-                        <div class="health-metrics">
-                            <div class="metric">
-                                <h3>CPU Usage</h3>
-                                <div class="progress-bar">
-                                    <div class="progress" id="cpu-progress" style="width: 0%"></div>
-                                </div>
-                                <p id="cpu-percent">0%</p>
-                            </div>
-                            <div class="metric">
-                                <h3>Memory Usage</h3>
-                                <div class="progress-bar">
-                                    <div class="progress" id="memory-progress" style="width: 0%"></div>
-                                </div>
-                                <p id="memory-percent">0%</p>
-                            </div>
-                            <div class="metric">
-                                <h3>Disk Usage</h3>
-                                <div class="progress-bar">
-                                    <div class="progress" id="disk-progress" style="width: 0%"></div>
-                                </div>
-                                <p id="disk-percent">0%</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="section">
-                        <h3>System Information</h3>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <span class="label">Platform:</span>
-                                <span class="value" id="system-platform">-</span>
-                            </div>
-                            <div class="info-item">
-                                <span class="label">Last Check:</span>
-                                <span class="value" id="health-timestamp">-</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- Settings View -->
-            <div id="settings-view" class="view">
-                <div class="section">
-                    <h2>Settings</h2>
-                    <div class="card-large">
-                        <div class="settings-content">
-                            <h3>Dashboard Configuration</h3>
-                            <div class="setting-item">
-                                <label>Auto-Refresh Interval (seconds)</label>
-                                <input type="number" id="refresh-interval" value="10" min="5" max="60">
-                                <small>How often to refresh data from the server</small>
-                            </div>
-                            <div class="setting-item">
-                                <label>
-                                    <input type="checkbox" id="enable-notifications" checked>
-                                    Enable Browser Notifications
-                                </label>
-                            </div>
-                            <div class="setting-item">
-                                <label>
-                                    <input type="checkbox" id="enable-autoupdate" checked>
-                                    Enable Auto-Update
-                                </label>
-                            </div>
-                            <button onclick="saveSettings()" class="btn btn-primary">Save Settings</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+def check_auth(username, password):
+    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
 
-    <script>
-        let refreshInterval = 10000; // 10 seconds default
-        let autoUpdateEnabled = true;
 
-        // Load initial dashboard
-        window.addEventListener('load', () => {
-            loadDashboard();
-            setInterval(refreshData, refreshInterval);
-        });
+def authenticate():
+    return (
+        "Authentication required",
+        401,
+        {"WWW-Authenticate": 'Basic realm="AI-Bot Dashboard"'},
+    )
 
-        function showView(viewId) {
-            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-            document.getElementById(viewId).classList.add('active');
-            document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
-            event.target.classList.add('active');
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+
+    return decorated
+
+
+@app.route("/")
+@requires_auth
+def index():
+    status = {
+        "bot_name": BOT_NAME,
+        "bot_version": BOT_VERSION,
+        "status": "running",
+        "last_check": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    return render_template("index.html", status=status)
+
+
+@app.route("/api/status")
+@requires_auth
+def api_status():
+    return jsonify(
+        {
+            "bot_name": BOT_NAME,
+            "bot_version": BOT_VERSION,
+            "status": "running",
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
+
+
+@app.route("/api/health")
+@requires_auth
+def api_health():
+    stats = get_system_status()
+    if not stats:
+        return jsonify({"error": "Failed to retrieve system stats"}), 500
+    return jsonify(
+        {
+            "cpu_percent": stats.get("cpu_percent", 0),
+            "memory_percent": stats.get("memory_percent", 0),
+            "disk_percent": stats.get("disk_percent", 0),
+            "platform": stats.get("platform", "unknown"),
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
+
+
+@app.route("/api/github")
+@requires_auth
+def api_github():
+    repo_info = fetch_repo_summary(GITHUB_REPO)
+    if not repo_info:
+        return jsonify({"error": f"Failed to fetch repository {GITHUB_REPO}"}), 500
+    return jsonify(
+        {
+            "repository": repo_info.get("full_name", GITHUB_REPO),
+            "description": repo_info.get("description", "N/A"),
+            "default_branch": repo_info.get("default_branch", "unknown"),
+            "visibility": repo_info.get("visibility", "unknown"),
+            "stars": repo_info.get("stargazers_count", 0),
+            "forks": repo_info.get("forks_count", 0),
+            "watchers": repo_info.get("watchers_count", 0),
+            "open_issues": repo_info.get("open_issues_count", 0),
+            "created_at": repo_info.get("created_at", "unknown"),
+            "last_push": repo_info.get("pushed_at", "unknown"),
+            "url": repo_info.get("html_url", "#"),
+            "timestamp": datetime.now().isoformat(),
+        }
+    )
+
+
+@app.route("/api/dashboard")
+@requires_auth
+def api_dashboard():
+    repo_info = fetch_repo_summary(GITHUB_REPO)
+    system_stats = get_system_status()
+
+    dashboard_data = {
+        "bot": {
+            "name": BOT_NAME,
+            "version": BOT_VERSION,
+            "status": "running",
+            "timestamp": datetime.now().isoformat(),
+        },
+        "github": None,
+        "system": None,
+    }
+
+    if repo_info:
+        dashboard_data["github"] = {
+            "repository": repo_info.get("full_name", GITHUB_REPO),
+            "description": repo_info.get("description", "N/A"),
+            "stars": repo_info.get("stargazers_count", 0),
+            "forks": repo_info.get("forks_count", 0),
+            "open_issues": repo_info.get("open_issues_count", 0),
+            "last_push": repo_info.get("pushed_at", "unknown"),
+            "url": repo_info.get("html_url", "#"),
         }
 
-        function loadDashboard() {
-            showView('dashboard-view');
-            refreshAllData();
+    if system_stats:
+        dashboard_data["system"] = {
+            "cpu_percent": system_stats.get("cpu_percent", 0),
+            "memory_percent": system_stats.get("memory_percent", 0),
+            "disk_percent": system_stats.get("disk_percent", 0),
+            "platform": system_stats.get("platform", "unknown"),
         }
 
-        function loadGitHub() {
-            showView('github-view');
-            fetchGitHubData();
-        }
+    return jsonify(dashboard_data)
 
-        function loadHealth() {
-            showView('health-view');
-            fetchHealthData();
-        }
 
-        function loadSettings() {
-            showView('settings-view');
-        }
+@app.route("/api/tasks/github", methods=["POST"])
+@requires_auth
+def trigger_github_task():
+    try:
+        github_monitor_task()
+        append_log("Manual GitHub task triggered from dashboard")
+        return jsonify({"status": "success", "message": "GitHub task executed"})
+    except Exception as exc:
+        append_log(f"Manual GitHub task failed: {str(exc)}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
-        async function refreshAllData() {
-            if (!autoUpdateEnabled) return;
-            await Promise.all([
-                fetchDashboardData(),
-                fetchGitHubData(),
-                fetchHealthData()
-            ]);
-        }
 
-        async function refreshData() {
-            if (!autoUpdateEnabled) return;
-            const activeView = document.querySelector('.view.active');
-            if (activeView.id === 'dashboard-view') {
-                await refreshAllData();
-            }
-        }
+@app.route("/api/tasks/health", methods=["POST"])
+@requires_auth
+def trigger_health_task():
+    try:
+        system_health_task()
+        append_log("Manual health task triggered from dashboard")
+        return jsonify({"status": "success", "message": "Health task executed"})
+    except Exception as exc:
+        append_log(f"Manual health task failed: {str(exc)}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
-        async function fetchDashboardData() {
-            try {
-                const response = await fetch('/api/dashboard');
-                if (!response.ok) throw new Error('Failed to fetch dashboard data');
-                const data = await response.json();
 
-                // Update bot status
-                document.getElementById('bot-status').textContent = data.bot.status;
-                document.getElementById('status-badge').textContent = '● ' + data.bot.status;
+@app.route("/api/tasks/backup", methods=["POST"])
+@requires_auth
+def trigger_backup_task():
+    try:
+        backup_task()
+        append_log("Manual backup task triggered from dashboard")
+        return jsonify({"status": "success", "message": "Backup task executed"})
+    except Exception as exc:
+        append_log(f"Manual backup task failed: {str(exc)}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
-                // Update GitHub data
-                if (data.github) {
-                    document.getElementById('github-repo').textContent = data.github.stars || '0';
-                    document.getElementById('github-forks').textContent = data.github.forks || '-';
-                    document.getElementById('github-issues').textContent = data.github.open_issues || '-';
-                }
 
-                // Update system data
-                if (data.system) {
-                    document.getElementById('cpu-usage').textContent = data.system.cpu_percent.toFixed(1) + '%';
-                    document.getElementById('memory-usage').textContent = data.system.memory_percent.toFixed(1) + '%';
-                    document.getElementById('disk-usage').textContent = data.system.disk_percent.toFixed(1) + '%';
-                }
+@app.route("/api/tasks/summary", methods=["POST"])
+@requires_auth
+def trigger_summary_task():
+    try:
+        daily_summary_task()
+        append_log("Manual summary task triggered from dashboard")
+        return jsonify({"status": "success", "message": "Summary task executed"})
+    except Exception as exc:
+        append_log(f"Manual summary task failed: {str(exc)}")
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
-                // Update timestamp
-                const now = new Date();
-                document.getElementById('last-update').textContent = now.toLocaleTimeString();
-            } catch (error) {
-                console.error('Error fetching dashboard:', error);
-            }
-        }
 
-        async function fetchGitHubData() {
-            try {
-                const response = await fetch('/api/github');
-                if (!response.ok) throw new Error('Failed to fetch GitHub data');
-                const data = await response.json();
+@app.route("/api/bot/restart", methods=["POST"])
+@requires_auth
+def restart_bot():
+    append_log("Dashboard requested bot restart")
+    return jsonify({"status": "success", "message": "Bot restart requested"})
 
-                document.getElementById('gh-repo-name').textContent = data.repository;
-                document.getElementById('gh-repo-desc').textContent = data.description || 'No description';
-                document.getElementById('gh-stars').textContent = data.stars;
-                document.getElementById('gh-forks').textContent = data.forks;
-                document.getElementById('gh-watchers').textContent = data.watchers;
-                document.getElementById('gh-issues').textContent = data.open_issues;
-                document.getElementById('gh-branch').textContent = data.default_branch;
-                document.getElementById('gh-visibility').textContent = data.visibility;
-                document.getElementById('gh-last-push').textContent = new Date(data.last_push).toLocaleString();
-                document.getElementById('gh-created').textContent = new Date(data.created_at).toLocaleString();
-                document.getElementById('gh-url').href = data.url;
-            } catch (error) {
-                console.error('Error fetching GitHub data:', error);
-            }
-        }
 
-        async function fetchHealthData() {
-            try {
-                const response = await fetch('/api/health');
-                if (!response.ok) throw new Error('Failed to fetch health data');
-                const data = await response.json();
+@app.route("/api/logs")
+@requires_auth
+def get_logs():
+    lines = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r", encoding="utf-8") as file:
+            lines = file.readlines()[-200:]
+    return jsonify({"logs": lines})
 
-                const cpu = data.cpu_percent;
-                const memory = data.memory_percent;
-                const disk = data.disk_percent;
 
-                // Update progress bars
-                document.getElementById('cpu-progress').style.width = cpu + '%';
-                document.getElementById('memory-progress').style.width = memory + '%';
-                document.getElementById('disk-progress').style.width = disk + '%';
+@app.route("/api/logs/download")
+@requires_auth
+def download_logs():
+    if not os.path.exists(LOG_FILE):
+        return jsonify({"error": "No log file found"}), 404
+    return send_file(LOG_FILE, as_attachment=True, download_name="bot.log")
 
-                // Update percentages
-                document.getElementById('cpu-percent').textContent = cpu.toFixed(1) + '%';
-                document.getElementById('memory-percent').textContent = memory.toFixed(1) + '%';
-                document.getElementById('disk-percent').textContent = disk.toFixed(1) + '%';
-                document.getElementById('system-platform').textContent = data.platform;
-                document.getElementById('health-timestamp').textContent = new Date(data.timestamp).toLocaleTimeString();
-            } catch (error) {
-                console.error('Error fetching health data:', error);
-            }
-        }
 
-        function saveSettings() {
-            const interval = parseInt(document.getElementById('refresh-interval').value);
-            refreshInterval = interval * 1000;
-            autoUpdateEnabled = document.getElementById('enable-autoupdate').checked;
-            alert('Settings saved!');
-        }
-    </script>
-</body>
-</html>
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+    return jsonify({"error": "Internal server error"}), 500
+
+
+if __name__ == "__main__":
+    os.makedirs("logs", exist_ok=True)
+    if not os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "w", encoding="utf-8") as handle:
+            handle.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Dashboard started\n")
+    print(f"Starting {BOT_NAME} Dashboard...")
+    print(f"Access at: http://{DASHBOARD_HOST}:{DASHBOARD_PORT}")
+    print(f"Username: {ADMIN_USERNAME}")
+    app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=DASHBOARD_DEBUG)
+
+
+""" 
+
+"""
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
